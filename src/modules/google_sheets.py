@@ -37,6 +37,7 @@ class Lead:
     send_attempts: int = 0
     last_attempt: Optional[datetime] = None
     status: str = "pending"  # pending, queued, sent, failed, skipped
+    row_index: int = 0  # Row number in the spreadsheet for updates
 
     def __post_init__(self) -> None:
         """Validate lead data after initialization."""
@@ -63,6 +64,7 @@ class Lead:
             "send_attempts": self.send_attempts,
             "last_attempt": self.last_attempt.isoformat() if self.last_attempt else None,
             "status": self.status,
+            "row_index": self.row_index,
         }
 
     @classmethod
@@ -84,6 +86,7 @@ class Lead:
             send_attempts=int(data.get("send_attempts", 0)),
             last_attempt=last_attempt,
             status=data.get("status", "pending"),
+            row_index=int(data.get("row_index", 0)),
         )
 
 
@@ -150,7 +153,7 @@ def validate_github_url(url: str) -> tuple[bool, str]:
 class LeadDatabase:
     """Database for storing and tracking leads."""
 
-    def __init__(self, db_path: str = "/tmp/leads.db"):
+    def __init__(self, db_path: str = "data/leads.db"):
         self.db_path = db_path
 
     async def init(self) -> None:
@@ -354,21 +357,29 @@ class GoogleSheetsService:
         self,
         credentials_file: str,
         spreadsheet_id: str,
-        sheet_range: str = "Sheet1!A:D",
+        sheet_range: str = "Sheet1!A:E",
     ):
         self.credentials_file = credentials_file
         self.spreadsheet_id = spreadsheet_id
         self.sheet_range = sheet_range
         self.service: Optional[Any] = None
+        self.write_service: Optional[Any] = None
 
-    async def authenticate(self) -> None:
+    async def authenticate(self, read_only: bool = True) -> None:
         """Authenticate with Google Sheets API."""
         try:
+            scopes = (
+                ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+                if read_only
+                else ["https://www.googleapis.com/auth/spreadsheets"]
+            )
             creds = Credentials.from_authorized_user_info(
-                self._load_credentials(), ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+                self._load_credentials(), scopes
             )
             http = AuthorizedHttp(creds)
             self.service = build("sheets", "v4", http=http)
+            if not read_only:
+                self.write_service = self.service
             logger.info("Authenticated with Google Sheets API")
         except Exception as e:
             logger.error(f"Authentication error: {e}")
@@ -381,11 +392,16 @@ class GoogleSheetsService:
         with open(self.credentials_file, "r") as f:
             return json.load(f)
 
-    async def read_leads(self, batch_size: int = 100) -> list[Lead]:
+    async def read_leads(
+        self,
+        batch_size: int = 100,
+        status_filter: Optional[str] = None,
+    ) -> list[Lead]:
         """Read leads from Google Sheets.
 
         Args:
             batch_size: Number of leads to read at a time
+            status_filter: If set, only return leads with this status
 
         Returns:
             List of Lead objects
@@ -410,23 +426,53 @@ class GoogleSheetsService:
             data_rows = values[1:]
 
             leads = []
-            for i, row in enumerate(data_rows[:batch_size], start=1):
-                # Support 3-column format: User Name, email, github_url
-                # Or 4-column format: No, User Name, email, github_url
+            for i, row in enumerate(data_rows[:batch_size], start=2):  # Start at row 2 (after header)
+                # Support formats:
+                # 3 columns: User Name, email, github_url
+                # 4 columns: No, User Name, email, github_url
+                # 5 columns: No, User Name, email, github_url, status
                 if len(row) < 2:
                     continue
 
-                # Handle column positions based on count
-                if len(row) >= 4:
+                # Determine columns
+                num_cols = len(row)
+                
+                # Default values
+                user_name = ""
+                email = ""
+                github_url = ""
+                status = "pending"
+                no = i - 1  # Default row number
+
+                if num_cols >= 5:
+                    # 5 columns: No, User Name, email, github_url, status
+                    # Note: Column E is status
+                    try:
+                        no = int(row[0])
+                    except (ValueError, IndexError):
+                        no = i - 1
+                    user_name = row[1].strip() if len(row) > 1 else ""
+                    email = row[2].strip().lower() if len(row) > 2 else ""
+                    github_url = row[3].strip() if len(row) > 3 else ""
+                    status = row[4].strip().lower() if len(row) > 4 else "pending"
+                elif num_cols >= 4:
                     # 4 columns: No, User Name, email, github_url
-                    user_name = row[1].strip()
-                    email = row[2].strip().lower()
+                    try:
+                        no = int(row[0])
+                    except (ValueError, IndexError):
+                        no = i - 1
+                    user_name = row[1].strip() if len(row) > 1 else ""
+                    email = row[2].strip().lower() if len(row) > 2 else ""
                     github_url = row[3].strip() if len(row) > 3 else ""
                 else:
                     # 3 columns: User Name, email, github_url
-                    user_name = row[0].strip()
-                    email = row[1].strip().lower()
+                    user_name = row[0].strip() if len(row) > 0 else ""
+                    email = row[1].strip().lower() if len(row) > 1 else ""
                     github_url = row[2].strip() if len(row) > 2 else ""
+
+                # Filter by status if requested
+                if status_filter and status.lower() != status_filter.lower():
+                    continue
 
                 # Validate email
                 is_valid, error = validate_email_format(email)
@@ -442,10 +488,12 @@ class GoogleSheetsService:
                         github_url = ""  # Allow without URL
 
                 lead = Lead(
-                    no=i,
+                    no=no,
                     user_name=user_name,
                     email=email,
                     github_url=github_url,
+                    status=status,
+                    row_index=i,  # Actual row in spreadsheet
                 )
                 leads.append(lead)
 
@@ -457,27 +505,121 @@ class GoogleSheetsService:
             raise
 
     async def get_leads_with_dedup(
-        self, db: LeadDatabase, batch_size: int = 100
+        self,
+        batch_size: int = 100,
+        status_filter: str = "pending",
     ) -> list[Lead]:
-        """Read leads and filter duplicates.
+        """Read leads from Sheets and filter by status.
 
         Args:
-            db: LeadDatabase instance for deduplication
             batch_size: Maximum leads to return
+            status_filter: Only return leads with this status (default: pending)
 
         Returns:
             List of unique, validated leads
         """
-        all_leads = await self.read_leads(batch_size)
+        all_leads = await self.read_leads(batch_size, status_filter=status_filter)
 
         unique_leads = []
+        seen_emails = set()
+        
         for lead in all_leads:
-            if await db.is_duplicate(lead.email):
+            # Filter by status in Sheets (already done via status_filter)
+            # Track seen emails to avoid duplicates
+            if lead.email.lower() in seen_emails:
                 logger.debug(f"Skipping duplicate: {lead.email}")
                 continue
+            seen_emails.add(lead.email.lower())
             unique_leads.append(lead)
 
         logger.info(
-            f"Found {len(unique_leads)} new leads after deduplication"
+            f"Found {len(unique_leads)} leads with status '{status_filter}'"
         )
         return unique_leads
+
+    async def update_lead_status(
+        self,
+        row_index: int,
+        new_status: str,
+    ) -> bool:
+        """Update lead status in Google Sheets.
+
+        Args:
+            row_index: Row number in the spreadsheet (1-indexed, with header)
+            new_status: New status (pending, queued, sent, failed, skipped)
+
+        Returns:
+            True if update was successful
+        """
+        # Ensure we have write service
+        if not self.write_service:
+            await self.authenticate(read_only=False)
+
+        try:
+            # Column E is status (column 5)
+            range_name = f"Sheet1!E{row_index}"
+            
+            result = (
+                self.write_service.spreadsheets()
+                .values()
+                .update(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=range_name,
+                    valueInputOption="USER_ENTERED",
+                    body={"values": [[new_status]]},
+                )
+                .execute()
+            )
+            
+            logger.info(
+                f"Updated row {row_index} to status '{new_status}'"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"Error updating lead status: {e}")
+            return False
+
+    async def get_stats(self) -> dict[str, int]:
+        """Get lead statistics from Sheets.
+
+        Returns:
+            Dictionary with counts per status
+        """
+        if not self.service:
+            await self.authenticate()
+
+        try:
+            result = (
+                self.service.spreadsheets()
+                .values()
+                .get(spreadsheetId=self.spreadsheet_id, range=self.sheet_range)
+                .execute()
+            )
+
+            values = result.get("values", [])
+            if not values:
+                return {"total": 0, "pending": 0, "queued": 0, "sent": 0, "failed": 0}
+
+            # Count statuses (skip header)
+            stats = {
+                "total": len(values) - 1,
+                "pending": 0,
+                "queued": 0,
+                "sent": 0,
+                "failed": 0,
+            }
+
+            for row in values[1:]:
+                if len(row) >= 5:
+                    status = row[4].strip().lower()
+                    if status in stats:
+                        stats[status] = stats.get(status, 0) + 1
+                else:
+                    stats["pending"] += 1
+
+            return stats
+
+        except Exception as e:
+            logger.error(f"Error getting stats: {e}")
+            return {"total": 0, "pending": 0, "queued": 0, "sent": 0, "failed": 0}

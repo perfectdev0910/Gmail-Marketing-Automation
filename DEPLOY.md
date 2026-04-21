@@ -54,7 +54,7 @@ Update `config.yaml` with your settings:
 ```yaml
 sheets:
   spreadsheet_id: "YOUR_SPREADSHEET_ID"
-  sheet_range: "Sheet1!A:C"  # 3 columns: Name, Email, GitHub
+  sheet_range: "Sheet1!A:E"  # 5 columns: No, Name, Email, GitHub, Status
 
 gmail_accounts:
   accounts:
@@ -62,6 +62,27 @@ gmail_accounts:
       email: "your-email@gmail.com"
       credentials_file: "accounts/gmail_account_1.json"
 ```
+
+### Step 7: Prepare Google Sheets
+
+Your spreadsheet should have these columns (Sheet1 with header row):
+
+| A | B | C | D | E |
+|---|---|---|---|---|
+| No | User Name | email | github_url | status |
+| 1 | Hadley Wickham | h.wickham@gmail.com | https://github.com/hadley | pending |
+| 2 | Steve Klabnik | steve@steveklabnik.com | https://github.com/steveklabnik | pending |
+| 3 | Dave Rupert | rupato@gmail.com | https://github.com/davatron5000 | pending |
+
+**Status Column (E) values:**
+- `pending` - New lead, ready to process (default)
+- `queued` - Loaded, waiting in queue
+- `processing` - Being processed/sending
+- `sent` - Email sent successfully
+- `failed` - Sending failed
+- `skipped` - Skipped (invalid data, etc.)
+
+**Important:** Set Column E to "pending" (or leave blank) for new leads. The system automatically updates this column as leads are processed. This prevents duplicate processing when redeploying.
 
 ### Step 7: Deploy
 
@@ -88,16 +109,25 @@ Use a free cron service to hit your endpoint:
 
 ## Google Sheets Format
 
-Your spreadsheet should have these columns:
+Your spreadsheet should have 5 columns with a header row (Sheet1):
 
-| A | B | C |
-|---|---|---|
-| User Name | email | github_url |
-| Hadley Wickham | h.wickham@gmail.com | https://github.com/hadley |
-| Steve Klabnik | steve@steveklabnik.com | https://github.com/steveklabnik |
-| Dave Rupert | rupato@gmail.com | https://github.com/davatron5000 |
+| A | B | C | D | E |
+|---|---|---|---|---|
+| No | User Name | email | github_url | status |
+| 1 | Hadley Wickham | h.wickham@gmail.com | https://github.com/hadley | pending |
+| 2 | Steve Klabnik | steve@steveklabnik.com | https://github.com/steveklabnik | pending |
+| 3 | Dave Rupert | rupato@gmail.com | https://github.com/davatron5000 | sent |
 
-**Note:** No header row needed - the system skips the first row automatically.
+**Status values:**
+- `pending` - New leads to process (set this for new data)
+- `queued` - In queue waiting to send
+- `processing` - Currently sending
+- `sent` - Successfully sent
+- `failed` - Failed to send
+- `skipped` - Skipped
+
+**How it prevents duplicates:**
+The system only reads rows with status `pending`. When you redeploy, rows already marked as `sent` or `queued` are skipped, so no duplicates are sent.
 
 ## Gmail OAuth Setup
 

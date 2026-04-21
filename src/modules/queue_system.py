@@ -45,6 +45,7 @@ class QueueItem:
     scheduled_at: datetime = field(default_factory=datetime.now)
     sent_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    row_index: int = 0  # Row index in Sheets for status update
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -65,6 +66,7 @@ class QueueItem:
             "scheduled_at": self.scheduled_at.isoformat(),
             "sent_at": self.sent_at.isoformat() if self.sent_at else None,
             "error_message": self.error_message,
+            "row_index": self.row_index,
         }
 
     @classmethod
@@ -78,6 +80,11 @@ class QueueItem:
                 pass
 
         scheduled_at = datetime.now()
+        if data.get("scheduled_at"):
+            try:
+                scheduled_at = datetime.fromisoformat(data["scheduled_at"])
+            except (ValueError, TypeError):
+                pass
         if data.get("scheduled_at"):
             try:
                 scheduled_at = datetime.fromisoformat(data["scheduled_at"])
@@ -332,6 +339,7 @@ class QueueManager:
         body_html: str,
         account_id: str,
         scheduled_at: Optional[datetime] = None,
+        row_index: int = 0,
     ) -> bool:
         """Add email to queue."""
         import uuid
@@ -346,6 +354,7 @@ class QueueManager:
             body_html=body_html,
             account_id=account_id,
             scheduled_at=scheduled_at or datetime.now(),
+            row_index=row_index,
         )
 
         return await self.db.enqueue(item)

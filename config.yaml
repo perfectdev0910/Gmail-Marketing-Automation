@@ -19,9 +19,9 @@ system:
 sheets:
   credentials_file: "credentials.json"
   spreadsheet_id: "1mNaYv7ILmo-3ghyOeEc2ktNkPSnnhteKHGXwmyJjl8Y"
-  # Use "Sheet1!A:D" for 4 columns (No, User Name, email, github_url)
-  # Use "Sheet1!A:C" for 3 columns (User Name, email, github_url)
-  sheet_range: "Sheet1!A:C"
+  # 5 columns: No, User Name, email, github_url, status
+  # Status values: pending, queued, processing, sent, failed, skipped
+  sheet_range: "Sheet1!A:E"
   batch_size: 100
   read_interval_minutes: 30
 

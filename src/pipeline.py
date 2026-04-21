@@ -1,11 +1,12 @@
 """Main pipeline orchestrator.
 
 This module orchestrates the entire email outreach system:
-- Lead loading and validation
+- Lead loading and validation (from Google Sheets)
 - Email generation
 - Queue management
 - Worker execution
 - Safety checks
+- Logging to Google Sheets for persistence
 """
 
 import asyncio
@@ -14,7 +15,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from src.config import ConfigLoader, AppConfig
-from src.modules.google_sheets import GoogleSheetsService, LeadDatabase, Lead
+from src.modules.google_sheets import GoogleSheetsService, Lead
 from src.modules.gmail_accounts import AccountManager, GmailAccount
 from src.modules.email_template import EmailBuilder, TemplateManager
 from src.modules.openai_integration import OpenAIService
@@ -35,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 class EmailPipeline:
-    """Main email outreach pipeline."""
+    """Main email outreach pipeline using Google Sheets as the database."""
 
     def __init__(self, config_path: Optional[str] = None):
         # Load configuration
@@ -44,23 +45,18 @@ class EmailPipeline:
 
         # Initialize components
         self.sheets_service: Optional[GoogleSheetsService] = None
-        self.lead_db: Optional[LeadDatabase] = None
         self.account_manager: Optional[AccountManager] = None
         self.templates: Optional[TemplateManager] = None
         self.openai_service: Optional[OpenAIService] = None
         self.queue_manager: Optional[QueueManager] = None
         self.gmail_db: Optional[GmailDatabase] = None
         self.gmail_client: Optional[GmailClientManager] = None
-        self.logs_db: Optional[LoggingDatabase] = None
+        self.logs_service: Optional[GoogleSheetsService] = None
         self.activity_logger: Optional[ActivityLogger] = None
 
     async def initialize(self) -> None:
         """Initialize all components."""
         logger.info("Initializing Email Pipeline...")
-
-        # Initialize lead database
-        self.lead_db = LeadDatabase("/tmp/leads.db")
-        await self.lead_db.init()
 
         # Initialize Gmail accounts manager
         self.account_manager = AccountManager(
@@ -84,7 +80,7 @@ class EmailPipeline:
                 temperature=self.config.openai.temperature,
             )
 
-        # Initialize queue
+        # Initialize queue (local SQLite for rate limiting)
         self.queue_manager = QueueManager(
             db_path=self.config.queue.sqlite.database,
             min_delay=self.config.sending_limits.min_delay_minutes,
@@ -94,7 +90,7 @@ class EmailPipeline:
         )
         await self.queue_manager.init()
 
-        # Initialize Gmail database
+        # Initialize Gmail database (local SQLite for sent email tracking)
         self.gmail_db = GmailDatabase(self.config.database.sqlite.database)
         await self.gmail_db.init()
 
@@ -108,7 +104,7 @@ class EmailPipeline:
                 email_address=account.email,
             )
 
-        # Initialize logging
+        # Initialize logging (local SQLite for activity logs)
         self.logs_db = LoggingDatabase()
         await self.logs_db.init()
         self.activity_logger = ActivityLogger(self.logs_db)
@@ -116,10 +112,10 @@ class EmailPipeline:
         logger.info("Pipeline initialized successfully")
 
     async def load_leads(self) -> int:
-        """Load leads from Google Sheets.
+        """Load leads from Google Sheets (status tracking in Sheets).
 
         Returns:
-            Number of new leads loaded
+            Number of leads loaded
         """
         config = self.config.sheets
 
@@ -129,23 +125,32 @@ class EmailPipeline:
             sheet_range=config.sheet_range,
         )
 
-        # Get new leads
+        # Get pending leads from Sheets (duplication check done in Sheets)
         new_leads = await self.sheets_service.get_leads_with_dedup(
-            self.lead_db, config.batch_size
+            db=None,  # No longer needed - dedup in Sheets
+            batch_size=config.batch_size,
+            status_filter="pending",
         )
 
-        # Save to database
-        saved = await self.lead_db.save_leads(new_leads)
+        # Update status to 'queued' in Sheets
+        queued = 0
+        for lead in new_leads:
+            if lead.row_index > 0:
+                success = await self.sheets_service.update_lead_status(
+                    lead.row_index, "queued"
+                )
+                if success:
+                    queued += 1
 
         await self.activity_logger.log(
             "INFO",
-            f"Loaded {saved} leads from Google Sheets",
+            f"Loaded {queued} leads from Google Sheets (status updated to queued)",
         )
 
-        return saved
+        return queued
 
     async def process_leads(self) -> int:
-        """Process leads into queue.
+        """Process leads from Sheets into queue (via local queue).
 
         Returns:
             Number of emails queued
@@ -153,8 +158,19 @@ class EmailPipeline:
         if not self.account_manager or not self.queue_manager:
             raise RuntimeError("Pipeline not initialized")
 
-        # Get unprocessed leads
-        leads = await self.lead_db.get_unprocessed_leads(limit=50)
+        # Get queued leads from Sheets (status = 'queued' in Sheets)
+        if not self.sheets_service:
+            config = self.config.sheets
+            self.sheets_service = GoogleSheetsService(
+                credentials_file=config.credentials_file,
+                spreadsheet_id=config.spreadsheet_id,
+                sheet_range=config.sheet_range,
+            )
+
+        leads = await self.sheets_service.read_leads(
+            batch_size=50,
+            status_filter="queued",
+        )
         if not leads:
             return 0
 
@@ -211,10 +227,15 @@ class EmailPipeline:
                 subject=subject,
                 body_html=html_body,
                 account_id=account.id,
+                row_index=lead.row_index,  # Pass row index for status update
             )
 
             if success:
-                await self.lead_db.update_lead_status(lead.email, "queued")
+                # Update lead status in Sheets - mark as processing
+                if lead.row_index > 0:
+                    await self.sheets_service.update_lead_status(
+                        lead.row_index, "processing"
+                    )
                 queued += 1
 
                 await self.activity_logger.log(
@@ -285,7 +306,11 @@ class EmailPipeline:
                     account_id=item.account_id,
                     message_id=result,
                 )
-                await self.lead_db.mark_lead_processed(item.lead_email)
+                # Update Sheets status to 'sent'
+                if item.row_index > 0 and self.sheets_service:
+                    await self.sheets_service.update_lead_status(
+                        item.row_index, "sent"
+                    )
                 sent += 1
 
                 await self.activity_logger.log(
@@ -297,6 +322,11 @@ class EmailPipeline:
             else:
                 await self.queue_manager.mark_failed(item.id, result, retry=True)
                 await self.account_manager.record_send(item.account_id, False)
+                # Update Sheets status to 'failed'
+                if item.row_index > 0 and self.sheets_service:
+                    await self.sheets_service.update_lead_status(
+                        item.row_index, "failed"
+                    )
                 failed += 1
 
                 await self.activity_logger.log(
