@@ -18,7 +18,7 @@ system:
 # -----------------------------------------------------------------------------
 sheets:
   credentials_file: "credentials.json"
-  spreadsheet_id: ""
+  spreadsheet_id: "1mNaYv7ILmo-3ghyOeEc2ktNkPSnnhteKHGXwmyJjl8Y"
   # Use "Sheet1!A:D" for 4 columns (No, User Name, email, github_url)
   # Use "Sheet1!A:C" for 3 columns (User Name, email, github_url)
   sheet_range: "Sheet1!A:C"
@@ -35,7 +35,7 @@ gmail_accounts:
   # List of Gmail accounts (add more as needed)
   accounts:
     - id: "account_1"
-      email: "account1@example.com"
+      email: "adamwyrzycki31@gmail.com"
       credentials_file: "accounts/gmail_account_1.json"
       # Weight for weighted rotation (higher = more emails)
       weight: 1
@@ -51,7 +51,7 @@ gmail_accounts:
       last_used: null
 
     - id: "account_2"
-      email: "account2@example.com"
+      email: "adamwyrzycki28@gmail.com"
       credentials_file: "accounts/gmail_account_2.json"
       weight: 1
       daily_limit: 30
