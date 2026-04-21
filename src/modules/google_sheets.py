@@ -150,7 +150,7 @@ def validate_github_url(url: str) -> tuple[bool, str]:
 class LeadDatabase:
     """Database for storing and tracking leads."""
 
-    def __init__(self, db_path: str = "data/leads.db"):
+    def __init__(self, db_path: str = "/tmp/leads.db"):
         self.db_path = db_path
 
     async def init(self) -> None:
