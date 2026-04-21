@@ -59,7 +59,7 @@ class EmailPipeline:
         logger.info("Initializing Email Pipeline...")
 
         # Initialize lead database
-        self.lead_db = LeadDatabase("data/leads.db")
+        self.lead_db = LeadDatabase("/tmp/leads.db")
         await self.lead_db.init()
 
         # Initialize Gmail accounts manager
