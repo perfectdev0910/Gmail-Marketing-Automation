@@ -36,7 +36,7 @@ gmail_accounts:
   accounts:
     - id: "account_1"
       email: "adamwyrzycki31@gmail.com"
-      credentials_file: "accounts/gmail_account_1.json"
+      credentials_file: "gmail_account_1.json"
       # Weight for weighted rotation (higher = more emails)
       weight: 1
       # Daily limit for this account
@@ -52,7 +52,7 @@ gmail_accounts:
 
     - id: "account_2"
       email: "adamwyrzycki28@gmail.com"
-      credentials_file: "accounts/gmail_account_2.json"
+      credentials_file: "gmail_account_2.json"
       weight: 1
       daily_limit: 30
       hourly_limit: 8
