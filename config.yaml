@@ -1,0 +1,232 @@
+# =============================================================================
+# Gmail Marketing Automation System - Configuration
+# =============================================================================
+# This is the main configuration file for the email outreach system
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# System Settings
+# -----------------------------------------------------------------------------
+system:
+  name: "Gmail Marketing Automation"
+  version: "1.0.0"
+  environment: "production"  # production, development, testing
+  debug: false
+
+# -----------------------------------------------------------------------------
+# Google Sheets Configuration
+# -----------------------------------------------------------------------------
+sheets:
+  credentials_file: "credentials.json"
+  spreadsheet_id: ""
+  # Use "Sheet1!A:D" for 4 columns (No, User Name, email, github_url)
+  # Use "Sheet1!A:C" for 3 columns (User Name, email, github_url)
+  sheet_range: "Sheet1!A:C"
+  batch_size: 100
+  read_interval_minutes: 30
+
+# -----------------------------------------------------------------------------
+# Gmail Accounts Configuration
+# -----------------------------------------------------------------------------
+gmail_accounts:
+  # Rotation strategy: "round_robin" or "weighted"
+  rotation_strategy: "round_robin"
+  
+  # List of Gmail accounts (add more as needed)
+  accounts:
+    - id: "account_1"
+      email: "account1@example.com"
+      credentials_file: "accounts/gmail_account_1.json"
+      # Weight for weighted rotation (higher = more emails)
+      weight: 1
+      # Daily limit for this account
+      daily_limit: 30
+      # Hourly limit for this account
+      hourly_limit: 8
+      # Enabled for sending
+      enabled: true
+      # Error tracking
+      error_count: 0
+      success_count: 0
+      last_used: null
+
+    - id: "account_2"
+      email: "account2@example.com"
+      credentials_file: "accounts/gmail_account_2.json"
+      weight: 1
+      daily_limit: 30
+      hourly_limit: 8
+      enabled: true
+      error_count: 0
+      success_count: 0
+      last_used: null
+
+# -----------------------------------------------------------------------------
+# Sending Limits
+# -----------------------------------------------------------------------------
+sending_limits:
+  # Per-account limits
+  max_emails_per_account_day: 30
+  max_emails_per_account_hour: 8
+  max_emails_per_account_week: 150
+  
+  # Timing constraints
+  min_delay_minutes: 3
+  max_delay_minutes: 7
+  long_pause_minutes: 15
+  emails_before_long_pause: 4
+  
+  # Send window (local time, UTC)
+  send_window_start: 9  # 9 AM UTC
+  send_window_end: 17    # 5 PM UTC
+  
+  # Skip weekends
+  skip_weekends: true
+  
+  # Randomization
+  enable_randomization: true
+
+# -----------------------------------------------------------------------------
+# Safety Guards
+# -----------------------------------------------------------------------------
+safety:
+  # Error rate thresholds
+  account_error_threshold: 5    # Pause account if error rate > 5%
+  global_error_threshold: 10      # Pause system if error rate > 10%
+  
+  # Bounce detection
+  bounce_threshold: 5            # If bounce rate > 5%, pause account
+  max_consecutive_errors: 3      # Max consecutive errors before pause
+  
+  # Duplicate prevention
+  enable_deduplication: true
+  deduplication_window_days: 30
+
+# -----------------------------------------------------------------------------
+# Email Templates
+# -----------------------------------------------------------------------------
+email_templates:
+  # Path to templates directory
+  templates_dir: "templates"
+  
+  # Default template file
+  main_template: "outreach.html"
+  
+  # Variables to replace
+  variables:
+    - "{{firstName}}"
+    - "{{github_url}}"
+
+# -----------------------------------------------------------------------------
+# OpenAI Integration
+# -----------------------------------------------------------------------------
+openai:
+  api_key: ""  # Set via OPENAI_API_KEY env var
+  model: "gpt-4"
+  temperature: 0.7
+  max_tokens: 500
+  
+  # Subject line generation
+  generate_subject_variations: true
+  max_subject_variations: 3
+  
+  # Light personalization
+  enable_personalization: true
+  personalization_max_tokens: 100
+
+# -----------------------------------------------------------------------------
+# Queue Configuration
+# -----------------------------------------------------------------------------
+queue:
+  # Queue type: "redis" or "sqlite"
+  type: "redis"
+  
+  # Redis settings
+  redis:
+    host: "localhost"
+    port: 6379
+    db: 0
+    password: ""
+  
+  # SQLite fallback
+  sqlite:
+    database: "data/queue.db"
+  
+  # Queue names
+  pending_queue: "email_queue_pending"
+  processing_queue: "email_queue_processing"
+  failed_queue: "email_queue_failed"
+  
+  # Retry settings
+  max_retries: 3
+  retry_delay_minutes: 5
+
+# -----------------------------------------------------------------------------
+# Database Configuration
+# -----------------------------------------------------------------------------
+database:
+  # Database type: "sqlite", "postgresql", "mysql"
+  type: "sqlite"
+  
+  # SQLite settings
+  sqlite:
+    database: "data/emails.db"
+  
+  # Connection pool settings
+  pool_size: 10
+  max_overflow: 20
+
+# -----------------------------------------------------------------------------
+# Logging Configuration
+# -----------------------------------------------------------------------------
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+  # File logging
+  file:
+    enabled: true
+    path: "logs/email_system.log"
+    max_size_mb: 100
+    backup_count: 5
+  
+  # Console logging
+  console:
+    enabled: true
+  
+  # Structured logging
+  structlog:
+    enabled: true
+
+# -----------------------------------------------------------------------------
+# Follow-up System
+# -----------------------------------------------------------------------------
+followup:
+  enabled: true
+  
+  # First follow-up (days after initial send)
+  first_followup_days: 3
+  first_followup_template: "followup_1.html"
+  
+  # Second follow-up (days after first follow-up)
+  second_followup_days: 3
+  second_followup_template: "followup_2.html"
+  
+  # Max follow-ups per lead
+  max_followups: 2
+  
+  # Skip if previous email failed
+  skip_on_failure: true
+
+# -----------------------------------------------------------------------------
+# Worker Configuration
+# -----------------------------------------------------------------------------
+workers:
+  # Number of concurrent workers
+  worker_count: 2
+  
+  # Check interval (seconds)
+  check_interval: 60
+  
+  # Batch size per worker
+  batch_size: 10

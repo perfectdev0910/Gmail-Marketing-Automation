@@ -1,0 +1,19 @@
+{
+  "name": "gmail-marketing-automation",
+  "description": "Production-ready email outreach automation system",
+  "repository": "https://github.com/adamwyrzycki071-cmd/Gmail-Marketing-Automation",
+  "website": "https://github.com/adamwyrzycki071-cmd/Gmail-Marketing-Automation",
+  "keywords": ["python", "email", "automation", "gmail", "openai"],
+  "build": {
+    "builder": "heroku/python"
+  },
+  "environments": {
+    "review": {
+      "build": {
+        "commands": [
+          "python -m pip install -r requirements.txt"
+        ]
+      }
+    }
+  }
+}
