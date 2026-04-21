@@ -77,8 +77,8 @@ sending_limits:
   emails_before_long_pause: 4
   
   # Send window (local time, UTC)
-  send_window_start: 9  # 9 AM UTC
-  send_window_end: 17    # 5 PM UTC
+  send_window_start: 13  # 9 AM EST
+  send_window_end: 21    # 5 PM EST
   
   # Skip weekends
   skip_weekends: true
